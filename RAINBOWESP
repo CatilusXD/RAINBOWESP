@@ -1,0 +1,200 @@
+ocal Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local visuals = {}
+local espEnabled = true
+local espColor = Color3.fromHSV(0, 1, 1)  -- Default color (red)
+
+-- Toggle ESP with P
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.P then
+		espEnabled = not espEnabled
+		for _, v in pairs(visuals) do
+			v.tracer.Visible = false
+			v.nameTag.Visible = false
+			for _, line in pairs(v.box) do
+				line.Visible = false
+			end
+		end
+	end
+
+	-- Change ESP colors with K
+	if input.KeyCode == Enum.KeyCode.K then
+		-- Change color (cycling through colors)
+		local hue = math.random()  -- Randomize hue between 0 and 1
+		espColor = Color3.fromHSV(hue, 1, 1)
+	end
+end)
+
+-- Create visuals
+local function createVisual(player)
+	if visuals[player] then return end
+
+	local tracer = Drawing.new("Line")
+	tracer.Thickness = 2
+	tracer.Transparency = 1
+	tracer.Visible = false
+
+	local nameTag = Drawing.new("Text")
+	nameTag.Size = 18
+	nameTag.Center = true
+	nameTag.Outline = true
+	nameTag.Transparency = 1
+	nameTag.Visible = false
+	nameTag.Font = Drawing.Fonts.UI
+
+	local box = {
+		top = Drawing.new("Line"),
+		right = Drawing.new("Line"),
+		bottom = Drawing.new("Line"),
+		left = Drawing.new("Line")
+	}
+	for _, line in pairs(box) do
+		line.Thickness = 2
+		line.Transparency = 1
+		line.Visible = false
+	end
+
+	visuals[player] = {
+		tracer = tracer,
+		nameTag = nameTag,
+		box = box,
+		character = nil
+	}
+end
+
+local function removeVisual(player)
+	if visuals[player] then
+		visuals[player].tracer:Remove()
+		visuals[player].nameTag:Remove()
+		for _, line in pairs(visuals[player].box) do
+			line:Remove()
+		end
+		visuals[player] = nil
+	end
+end
+
+local function bindCharacter(player, character)
+	if visuals[player] then
+		visuals[player].character = character
+	end
+end
+
+local function onPlayerAdded(player)
+	if player == LocalPlayer then return end
+
+	createVisual(player)
+
+	player.CharacterAdded:Connect(function(char)
+		bindCharacter(player, char)
+	end)
+
+	if player.Character then
+		bindCharacter(player, player.Character)
+	end
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(removeVisual)
+for _, player in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(player)
+end
+
+-- 🌈 Rainbow loop (not needed anymore, we'll cycle colors using K)
+RunService.RenderStepped:Connect(function(dt)
+	if not espEnabled then return end
+
+	local myChar = LocalPlayer.Character
+	local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	if not myHRP then return end
+
+	local myScreenPos, myVisible = Camera:WorldToViewportPoint(myHRP.Position)
+
+	for player, data in pairs(visuals) do
+		local char = data.character
+		local tracer = data.tracer
+		local nameTag = data.nameTag
+		local box = data.box
+
+		if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Head") then
+			local hrp = char.HumanoidRootPart
+			local head = char.Head
+
+			-- Dynamic box size based on hitbox size
+			local headSize = head.Size
+			local hrpSize = hrp.Size
+			local width = math.max(headSize.X, hrpSize.X) * 2
+			local height = math.abs(head.Position.Y - hrp.Position.Y) + 5  -- Adjust height for visibility
+
+			local topPos = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, height / 2, 0))
+			local bottomPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, height / 2, 0))
+
+			local x = bottomPos.X - width / 2
+			local y = topPos.Y
+
+			local topLeft = Vector2.new(x, y)
+			local topRight = Vector2.new(x + width, y)
+			local bottomLeft = Vector2.new(x, y + height)
+			local bottomRight = Vector2.new(x + width, y + height)
+
+			if bottomPos.Z > 0 then
+				-- Box
+				box.top.From = topLeft
+				box.top.To = topRight
+				box.right.From = topRight
+				box.right.To = bottomRight
+				box.bottom.From = bottomRight
+				box.bottom.To = bottomLeft
+				box.left.From = bottomLeft
+				box.left.To = topLeft
+
+				for _, line in pairs(box) do
+					line.Color = espColor
+					line.Visible = true
+				end
+
+				-- Name
+				local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+				nameTag.Text = player.Name
+				nameTag.Position = Vector2.new(headPos.X, headPos.Y - 20)
+				nameTag.Color = espColor
+				nameTag.Visible = true
+
+				-- Tracer (from your screen pos to their HRP)
+				local theirScreenPos = Camera:WorldToViewportPoint(hrp.Position)
+				if myVisible then
+					tracer.From = Vector2.new(myScreenPos.X, myScreenPos.Y)
+					tracer.To = Vector2.new(theirScreenPos.X, theirScreenPos.Y)
+					tracer.Color = espColor
+					tracer.Visible = true
+				else
+					tracer.Visible = false
+				end
+
+				-- Body glow
+				for _, part in pairs(char:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.Color = espColor
+						part.Material = Enum.Material.ForceField
+					end
+				end
+			else
+				nameTag.Visible = false
+				tracer.Visible = false
+				for _, line in pairs(box) do
+					line.Visible = false
+				end
+			end
+		else
+			nameTag.Visible = false
+			tracer.Visible = false
+			for _, line in pairs(box) do
+				line.Visible = false
+			end
+		end
+	end
+end)
